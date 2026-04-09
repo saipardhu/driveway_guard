@@ -3,12 +3,15 @@ let autoScanActive = false;
 let autoScanTimer = null;
 let scanIntervalSec = 5;
 let isAnalyzing = false;
+const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
 
 const video = document.getElementById('videoFeed');
 const canvas = document.getElementById('captureCanvas');
 
 // Enumerate cameras on load
 async function loadCameras() {
+  updateMobileUI();
+
   try {
     // Request permission first
     const tmp = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -17,12 +20,20 @@ async function loadCameras() {
     const cams = devices.filter((d) => d.kind === 'videoinput');
     const sel = document.getElementById('cameraSelect');
     sel.innerHTML = '<option value="">Select camera...</option>';
+    let preferredCameraId = '';
     cams.forEach((c, i) => {
       const opt = document.createElement('option');
       opt.value = c.deviceId;
       opt.textContent = c.label || `Camera ${i + 1}`;
       sel.appendChild(opt);
+      if (isMobile && /back|rear|environment/i.test(opt.textContent)) {
+        preferredCameraId = c.deviceId;
+      }
     });
+    if (preferredCameraId) {
+      sel.value = preferredCameraId;
+      log('info', 'Rear camera auto-selected for mobile');
+    }
     log('info', `Found ${cams.length} camera(s)`);
   } catch (e) {
     log('warn', 'Camera permission denied or unavailable');
@@ -31,18 +42,38 @@ async function loadCameras() {
 
 async function startCamera() {
   const deviceId = document.getElementById('cameraSelect').value;
-  if (!deviceId) {
+  const videoConstraints = deviceId
+    ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+    : (isMobile
+      ? { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+      : null);
+
+  if (!videoConstraints) {
     log('warn', 'Please select a camera first');
     return;
   }
 
+  await startCameraWithConstraints(videoConstraints);
+}
+
+async function startMobileRearCamera() {
+  if (!isMobile) {
+    return;
+  }
+  await startCameraWithConstraints({
+    facingMode: { exact: 'environment' },
+    width: { ideal: 1280 },
+    height: { ideal: 720 }
+  });
+}
+
+async function startCameraWithConstraints(videoConstraints) {
   if (stream) {
     stream.getTracks().forEach((t) => t.stop());
   }
 
   try {
-    const constraints = { video: { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } } };
-    stream = await navigator.mediaDevices.getUserMedia(constraints);
+    stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
     video.srcObject = stream;
     video.style.display = 'block';
     document.getElementById('noCameraMsg').style.display = 'none';
@@ -52,7 +83,7 @@ async function startCamera() {
     setDot('cam', true, 'CAMERA LIVE');
     document.getElementById('scanNowBtn').disabled = false;
     document.getElementById('autoScanBtn').disabled = false;
-    log('info', 'Camera stream started');
+    log('info', isMobile ? 'Camera stream started (mobile ready)' : 'Camera stream started');
   } catch (e) {
     log('warn', `Failed to start camera: ${e.message}`);
   }
@@ -250,6 +281,22 @@ function setDot(type, active, label) {
   document.getElementById(type === 'cam' ? 'camStatusText' : 'aiStatusText').textContent = label;
 }
 
+function updateMobileUI() {
+  if (!isMobile) {
+    return;
+  }
+
+  const mobileHint = document.getElementById('mobileHint');
+  const mobileRearBtn = document.getElementById('mobileRearBtn');
+  const noCameraMsgText = document.querySelector('#noCameraMsg p');
+
+  if (mobileHint) mobileHint.style.display = 'block';
+  if (mobileRearBtn) mobileRearBtn.style.display = 'block';
+  if (noCameraMsgText) {
+    noCameraMsgText.innerHTML = 'On mobile, tap <strong>Use Rear Camera</strong> for better road visibility.';
+  }
+}
+
 function log(type, msg) {
   const container = document.getElementById('logEntries');
   const entry = document.createElement('div');
@@ -268,6 +315,7 @@ function log(type, msg) {
 
 // Expose functions used by inline button handlers.
 window.startCamera = startCamera;
+window.startMobileRearCamera = startMobileRearCamera;
 window.setInterval_ = setInterval_;
 window.toggleAutoScan = toggleAutoScan;
 window.scanNow = scanNow;

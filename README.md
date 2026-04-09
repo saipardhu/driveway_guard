@@ -20,6 +20,11 @@ driveway_guard/
 2. Select your camera and click **Start Camera**.
 3. Use **Scan Now** or enable **Auto-Scan**.
 
+## Recent Update (Apr 9, 2026)
+
+- Requirement 1 completed: added mobile-responsive layout updates and mobile camera improvements.
+- Mobile users now have a dedicated rear camera action and automatic rear-camera preference when available.
+
 ## Notes
 
 - Current version uses browser camera APIs and calls an external AI endpoint from the frontend.

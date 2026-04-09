@@ -57,9 +57,11 @@
   <div class="side-panel">
     <div class="panel-section">
       <div class="section-label">Camera Setup</div>
+      <div class="mobile-hint" id="mobileHint" style="display:none;">Mobile detected: use rear camera for driveway view.</div>
       <select id="cameraSelect">
         <option value="">Select camera...</option>
       </select>
+      <button class="btn btn-secondary" id="mobileRearBtn" onclick="startMobileRearCamera()" style="display:none;">Use Rear Camera</button>
       <button class="btn btn-primary" id="startCameraBtn" onclick="startCamera()">Start Camera</button>
     </div>
 

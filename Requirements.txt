@@ -1,0 +1,12 @@
+Preface:
+This project is currently very "vanilla" and standalone. IT needs an external mounted camera attached to a laptop but i want to make it more dynamic to enable mobile users to use it as well.
+
+Requirements: Will mark each of these as done if they are done and all the requirements preceded by a date means that they are stated as of then
+Core:
+April 9 2026
+1. We want to check and extend this functionality to mobile as well [Done]
+   - Done (Apr 9 2026): Added mobile-responsive UI, rear camera quick start, and mobile rear-camera auto-selection fallback.
+2. Deploy the web componenet to a web server so that users can login to it (we can start off simple by using something like nginx and buy a dns host, as cheap as possible) 
+3. users can login to the web via their mobile phone and use our tool
+[Stretch goal] 
+4. we can deploy a ios/android apps for this if possible - lets start with ios
