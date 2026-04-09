@@ -1,0 +1,3 @@
+# Copy this to `deploy/local/anthropic-key.conf` or use start-local.ps1 with -AnthropicApiKey.
+# Never commit real keys.
+set $anthropic_api_key "REPLACE_WITH_YOUR_ANTHROPIC_KEY";
