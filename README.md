@@ -25,6 +25,12 @@ driveway_guard/
 - Requirement 1 completed: added mobile-responsive layout updates and mobile camera improvements.
 - Mobile users now have a dedicated rear camera action and automatic rear-camera preference when available.
 
+## Production Deployment (Req2)
+
+- Local-first hosting is now available with Nginx + HTTP Basic Auth via Docker.
+- Start locally with `deploy/scripts/start-local.ps1` and docs at `docs/local-hosting.md`.
+- VPS/public rollout docs remain available at `docs/deployment-vps-nginx.md`.
+
 ## Notes
 
 - Current version uses browser camera APIs and calls an external AI endpoint from the frontend.
