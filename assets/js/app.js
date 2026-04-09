@@ -4,6 +4,10 @@ let autoScanTimer = null;
 let scanIntervalSec = 5;
 let isAnalyzing = false;
 const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+const apiConfig = {
+  endpoint: (window.DRIVEWAY_GUARD_CONFIG && window.DRIVEWAY_GUARD_CONFIG.apiEndpoint) || '/api/anthropic/messages',
+  apiKey: (window.DRIVEWAY_GUARD_CONFIG && window.DRIVEWAY_GUARD_CONFIG.apiKey) || ''
+};
 
 const video = document.getElementById('videoFeed');
 const canvas = document.getElementById('captureCanvas');
@@ -166,9 +170,17 @@ async function scanNow() {
     canvas.getContext('2d').drawImage(video, 0, 0);
     const base64Image = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const headers = {
+      'Content-Type': 'application/json',
+      'anthropic-version': '2023-06-01'
+    };
+    if (apiConfig.apiKey) {
+      headers['x-api-key'] = apiConfig.apiKey;
+    }
+
+    const response = await fetch(apiConfig.endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 1000,
@@ -202,6 +214,11 @@ Respond ONLY with a JSON object (no markdown, no explanation) in this exact form
       })
     });
 
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`AI request failed (${response.status}): ${errText.slice(0, 180)}`);
+    }
+
     const data = await response.json();
     const text = data.content.map((c) => c.text || '').join('');
 
@@ -216,8 +233,11 @@ Respond ONLY with a JSON object (no markdown, no explanation) in this exact form
     applyResult(result);
     document.getElementById('lastCheckTime').textContent = new Date().toLocaleTimeString();
   } catch (e) {
-    log('warn', `Scan error: ${e.message}`);
-    setBigStatus('warning', 'ERROR', 'Scan failed', e.message);
+    const hint = (e && e.message && e.message.includes('Failed to fetch'))
+      ? 'Network/proxy error. Ensure local API proxy is running at /api/anthropic/messages.'
+      : e.message;
+    log('warn', `Scan error: ${hint}`);
+    setBigStatus('warning', 'ERROR', 'Scan failed', hint);
   } finally {
     isAnalyzing = false;
     setDot('ai', false, 'AI STANDBY');

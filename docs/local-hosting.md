@@ -16,10 +16,12 @@ This is the recommended starting point for Requirement 2: host locally first, va
 
 ## Start local hosting
 
+Start local hosting (API key is injected into a gitignored file):
+
 From repository root (`d:\\projects\\driveway_guard`):
 
 ```powershell
-.\deploy\scripts\start-local.ps1 -Username drivewayadmin -Password "your-strong-password"
+.\deploy\scripts\start-local.ps1 -Username drivewayadmin -Password "your-strong-password" -AnthropicApiKey "your-real-anthropic-key"
 ```
 
 Then open:
@@ -27,6 +29,13 @@ Then open:
 - [http://localhost:8080](http://localhost:8080)
 
 You should get a username/password prompt before the app loads.
+Scans will use the local Nginx proxy endpoint (`/api/anthropic/messages`).
+
+### Secret file behavior
+
+- Script generates `deploy/local/anthropic-key.conf` automatically.
+- `deploy/local/anthropic-key.conf` is gitignored and must never be committed.
+- Example template is tracked at `deploy/local/anthropic-key.conf.example`.
 
 ## Stop local hosting
 
