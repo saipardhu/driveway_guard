@@ -22,8 +22,9 @@ if ([string]::IsNullOrWhiteSpace($AnthropicApiKey)) {
     throw "AnthropicApiKey is required. Pass -AnthropicApiKey `<your_key>`."
 }
 $keyConfigPath = "deploy/local/anthropic-key.conf"
-$safeKey = $AnthropicApiKey.Replace("\", "\\").Replace("`"", "\"")
-"set `$anthropic_api_key `"$safeKey`";" | Out-File -FilePath $keyConfigPath -Encoding ascii -NoNewline
+$safeKey = $AnthropicApiKey.Replace('\', '\\').Replace('"', '\"')
+$keyLine = 'set $anthropic_api_key "{0}";' -f $safeKey
+$keyLine | Out-File -FilePath $keyConfigPath -Encoding ascii -NoNewline
 
 Write-Host "[4/4] Starting local nginx..."
 docker compose -f deploy/local/docker-compose.yml up -d

@@ -5,8 +5,7 @@ let scanIntervalSec = 5;
 let isAnalyzing = false;
 const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
 const apiConfig = {
-  endpoint: (window.DRIVEWAY_GUARD_CONFIG && window.DRIVEWAY_GUARD_CONFIG.apiEndpoint) || '/api/anthropic/messages',
-  apiKey: (window.DRIVEWAY_GUARD_CONFIG && window.DRIVEWAY_GUARD_CONFIG.apiKey) || ''
+  endpoint: (window.DRIVEWAY_GUARD_CONFIG && window.DRIVEWAY_GUARD_CONFIG.apiEndpoint) || '/api/anthropic/messages'
 };
 
 const video = document.getElementById('videoFeed');
@@ -174,9 +173,6 @@ async function scanNow() {
       'Content-Type': 'application/json',
       'anthropic-version': '2023-06-01'
     };
-    if (apiConfig.apiKey) {
-      headers['x-api-key'] = apiConfig.apiKey;
-    }
 
     const response = await fetch(apiConfig.endpoint, {
       method: 'POST',
@@ -224,9 +220,11 @@ Respond ONLY with a JSON object (no markdown, no explanation) in this exact form
 
     let result;
     try {
-      const clean = text.replace(/```json|```/g, '').trim();
+      const clean = extractJsonObject(text);
       result = JSON.parse(clean);
     } catch (e) {
+      const preview = text.replace(/\s+/g, ' ').trim().slice(0, 280);
+      log('warn', `Could not parse AI response. Raw (trimmed): ${preview || '(empty)'}`);
       throw new Error('Could not parse AI response');
     }
 
@@ -246,11 +244,47 @@ Respond ONLY with a JSON object (no markdown, no explanation) in this exact form
   }
 }
 
+/** Pull first {...} block from model text (handles prose before/after JSON). */
+function extractJsonObject(raw) {
+  let s = raw.replace(/```json|```/gi, '').trim();
+  const start = s.indexOf('{');
+  const end = s.lastIndexOf('}');
+  if (start !== -1 && end > start) {
+    s = s.slice(start, end + 1);
+  }
+  return s;
+}
+
+function parseSideFlag(v) {
+  if (v == null) return false;
+  const s = String(v).trim().toLowerCase();
+  return s === 'detected' || s === 'hazard' || s === 'occupied' || s === 'yes' || s === 'true';
+}
+
+function parseSafeFlag(v) {
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'number' && !Number.isNaN(v)) return v !== 0;
+  if (typeof v === 'string') {
+    const s = v.trim().toLowerCase();
+    if (s === 'true' || s === 'safe' || s === 'yes' || s === 'clear') return true;
+    if (s === 'false' || s === 'unsafe' || s === 'no' || s === 'stop') return false;
+    return false;
+  }
+  if (v == null) return false;
+  return Boolean(v);
+}
+
+function parseConfidence(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
 function applyResult(r) {
-  const safe = r.safe;
-  const left = r.leftSide === 'detected';
-  const right = r.rightSide === 'detected';
-  const conf = r.confidence || 0;
+  const safe = parseSafeFlag(r.safe);
+  const left = parseSideFlag(r.leftSide);
+  const right = parseSideFlag(r.rightSide);
+  const conf = parseConfidence(r.confidence);
 
   // Update zone cards
   updateCard('left', left);
