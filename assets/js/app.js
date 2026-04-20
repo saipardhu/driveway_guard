@@ -3,108 +3,138 @@ let autoScanActive = false;
 let autoScanTimer = null;
 let scanIntervalSec = 5;
 let isAnalyzing = false;
-const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
-const apiConfig = {
-  endpoint: (window.DRIVEWAY_GUARD_CONFIG && window.DRIVEWAY_GUARD_CONFIG.apiEndpoint) || '/api/anthropic/messages'
-};
+let baselineFrame = null;
+let sensitivity = 55;
 
 const video = document.getElementById('videoFeed');
 const canvas = document.getElementById('captureCanvas');
+const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-// Enumerate cameras on load
+const els = {
+  autoScanBtn: document.getElementById('autoScanBtn'),
+  calibrateBtn: document.getElementById('calibrateBtn'),
+  cameraSelect: document.getElementById('cameraSelect'),
+  noCameraMsg: document.getElementById('noCameraMsg'),
+  scanLine: document.getElementById('scanLine'),
+  scanNowBtn: document.getElementById('scanNowBtn'),
+  sensitivityRange: document.getElementById('sensitivityRange'),
+  sensitivityValue: document.getElementById('sensitivityValue'),
+  startCameraBtn: document.getElementById('startCameraBtn'),
+  statusBanner: document.getElementById('statusBanner'),
+  videoOverlay: document.getElementById('videoOverlay')
+};
+
 async function loadCameras() {
-  updateMobileUI();
+  if (!navigator.mediaDevices?.getUserMedia) {
+    log('warn', 'Camera access requires a modern browser and a secure page');
+    return;
+  }
 
   try {
-    // Request permission first
-    const tmp = await navigator.mediaDevices.getUserMedia({ video: true });
-    tmp.getTracks().forEach((t) => t.stop());
     const devices = await navigator.mediaDevices.enumerateDevices();
-    const cams = devices.filter((d) => d.kind === 'videoinput');
-    const sel = document.getElementById('cameraSelect');
-    sel.innerHTML = '<option value="">Select camera...</option>';
-    let preferredCameraId = '';
-    cams.forEach((c, i) => {
-      const opt = document.createElement('option');
-      opt.value = c.deviceId;
-      opt.textContent = c.label || `Camera ${i + 1}`;
-      sel.appendChild(opt);
-      if (isMobile && /back|rear|environment/i.test(opt.textContent)) {
-        preferredCameraId = c.deviceId;
-      }
-    });
-    if (preferredCameraId) {
-      sel.value = preferredCameraId;
-      log('info', 'Rear camera auto-selected for mobile');
-    }
-    log('info', `Found ${cams.length} camera(s)`);
-  } catch (e) {
-    log('warn', 'Camera permission denied or unavailable');
+    renderCameraOptions(devices.filter((device) => device.kind === 'videoinput'));
+  } catch (error) {
+    log('warn', `Could not list cameras: ${error.message}`);
+  }
+}
+
+function renderCameraOptions(cameras) {
+  els.cameraSelect.innerHTML = '<option value="">Default camera</option>';
+  cameras.forEach((camera, index) => {
+    const option = document.createElement('option');
+    option.value = camera.deviceId;
+    option.textContent = camera.label || `Camera ${index + 1}`;
+    els.cameraSelect.appendChild(option);
+  });
+  log('info', cameras.length ? `Found ${cameras.length} camera(s)` : 'No cameras listed yet');
+}
+
+async function refreshCameraLabels() {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    renderCameraOptions(devices.filter((device) => device.kind === 'videoinput'));
+  } catch {
+    // Labels are a nice-to-have after permission is granted.
   }
 }
 
 async function startCamera() {
-  const deviceId = document.getElementById('cameraSelect').value;
-  const videoConstraints = deviceId
-    ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
-    : (isMobile
-      ? { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
-      : null);
-
-  if (!videoConstraints) {
-    log('warn', 'Please select a camera first');
+  if (!navigator.mediaDevices?.getUserMedia) {
+    log('warn', 'Camera access is not supported by this browser');
     return;
   }
 
-  await startCameraWithConstraints(videoConstraints);
-}
+  stopAutoScan({ silent: true });
+  stopStream();
+  resetDetectionState();
 
-async function startMobileRearCamera() {
-  if (!isMobile) {
-    return;
-  }
-  await startCameraWithConstraints({
-    facingMode: { exact: 'environment' },
+  const deviceId = els.cameraSelect.value;
+  const videoConstraints = {
     width: { ideal: 1280 },
-    height: { ideal: 720 }
-  });
-}
+    height: { ideal: 720 },
+    facingMode: 'environment'
+  };
 
-async function startCameraWithConstraints(videoConstraints) {
-  if (stream) {
-    stream.getTracks().forEach((t) => t.stop());
+  if (deviceId) {
+    videoConstraints.deviceId = { exact: deviceId };
+    delete videoConstraints.facingMode;
   }
 
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
+    stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
     video.srcObject = stream;
-    video.style.display = 'block';
-    document.getElementById('noCameraMsg').style.display = 'none';
-    document.getElementById('videoOverlay').style.display = 'block';
-    document.getElementById('statusBanner').style.display = 'flex';
+    await video.play();
+
+    els.noCameraMsg.hidden = true;
+    els.videoOverlay.classList.add('visible');
+    els.statusBanner.classList.add('visible');
+    els.scanNowBtn.disabled = false;
+    els.autoScanBtn.disabled = false;
+    els.calibrateBtn.disabled = false;
+    els.startCameraBtn.textContent = 'Restart Camera';
 
     setDot('cam', true, 'CAMERA LIVE');
-    document.getElementById('scanNowBtn').disabled = false;
-    document.getElementById('autoScanBtn').disabled = false;
-    log('info', isMobile ? 'Camera stream started (mobile ready)' : 'Camera stream started');
-  } catch (e) {
-    log('warn', `Failed to start camera: ${e.message}`);
+    setBigStatus('idle', 'READY', 'Camera is live', 'Calibrate on a clear driveway view, then scan');
+    await refreshCameraLabels();
+    log('info', 'Camera stream started');
+  } catch (error) {
+    els.noCameraMsg.hidden = false;
+    els.videoOverlay.classList.remove('visible');
+    els.scanNowBtn.disabled = true;
+    els.autoScanBtn.disabled = true;
+    els.calibrateBtn.disabled = true;
+    setDot('cam', false, 'CAMERA OFFLINE');
+    setBigStatus('warning', 'ERROR', 'Camera failed', error.message);
+    log('warn', `Failed to start camera: ${error.message}`);
   }
 }
 
-function setInterval_(val) {
-  scanIntervalSec = val;
-  document.querySelectorAll('.interval-btn').forEach((b) => {
-    b.classList.toggle('active', parseInt(b.dataset.val, 10) === val);
+function stopStream() {
+  if (!stream) return;
+  stream.getTracks().forEach((track) => track.stop());
+  stream = null;
+}
+
+function resetDetectionState() {
+  baselineFrame = null;
+  updateCard('left', null);
+  updateCard('right', null);
+  updateScore(0, true);
+  document.getElementById('lastCheckTime').textContent = '-';
+}
+
+function setInterval_(value) {
+  scanIntervalSec = value;
+  document.querySelectorAll('.interval-btn').forEach((button) => {
+    button.classList.toggle('active', Number(button.dataset.val) === value);
   });
-  if (autoScanActive) {
-    clearAutoTimer();
-    if (val > 0) {
-      scheduleNext();
-    } else {
-      stopAutoScan();
-    }
+
+  if (!autoScanActive) return;
+  if (value === 0) {
+    stopAutoScan();
+    return;
   }
+  scheduleNext();
 }
 
 function toggleAutoScan() {
@@ -116,201 +146,220 @@ function toggleAutoScan() {
 }
 
 function startAutoScan() {
-  if (scanIntervalSec === 0) {
-    log('warn', 'Set an interval first (not Manual)');
+  if (!stream) {
+    log('warn', 'Start the camera before enabling auto-scan');
     return;
   }
+  if (scanIntervalSec === 0) {
+    log('warn', 'Choose a timed interval before enabling auto-scan');
+    return;
+  }
+
   autoScanActive = true;
-  document.getElementById('autoScanBtn').textContent = 'Disable Auto-Scan';
-  document.getElementById('autoScanBtn').classList.remove('btn-success');
-  document.getElementById('autoScanBtn').classList.add('btn-danger');
-  document.getElementById('scanLine').classList.add('active');
-  log('info', `Auto-scan ON - every ${scanIntervalSec}s`);
+  els.autoScanBtn.textContent = 'Disable Auto-Scan';
+  els.autoScanBtn.classList.remove('btn-success');
+  els.autoScanBtn.classList.add('btn-danger');
+  els.scanLine.classList.add('active');
+  log('info', `Auto-scan on every ${scanIntervalSec}s`);
   scheduleNext();
 }
 
-function stopAutoScan() {
+function stopAutoScan(options = {}) {
+  const wasActive = autoScanActive;
   autoScanActive = false;
   clearAutoTimer();
-  document.getElementById('autoScanBtn').textContent = 'Enable Auto-Scan';
-  document.getElementById('autoScanBtn').classList.add('btn-success');
-  document.getElementById('autoScanBtn').classList.remove('btn-danger');
-  document.getElementById('scanLine').classList.remove('active');
-  log('info', 'Auto-scan disabled');
+  els.autoScanBtn.textContent = 'Enable Auto-Scan';
+  els.autoScanBtn.classList.add('btn-success');
+  els.autoScanBtn.classList.remove('btn-danger');
+  els.scanLine.classList.remove('active');
+  if (wasActive && !options.silent) log('info', 'Auto-scan disabled');
 }
 
 function scheduleNext() {
-  autoScanTimer = setTimeout(() => {
-    scanNow();
-    if (autoScanActive) {
-      scheduleNext();
-    }
+  clearAutoTimer();
+  autoScanTimer = window.setTimeout(async () => {
+    await scanNow();
+    if (autoScanActive) scheduleNext();
   }, scanIntervalSec * 1000);
 }
 
 function clearAutoTimer() {
   if (autoScanTimer) {
-    clearTimeout(autoScanTimer);
+    window.clearTimeout(autoScanTimer);
     autoScanTimer = null;
+  }
+}
+
+function captureFrame() {
+  if (!video.videoWidth || !video.videoHeight) {
+    throw new Error('Video is not ready yet');
+  }
+
+  const width = 320;
+  const height = Math.max(180, Math.round(width * (video.videoHeight / video.videoWidth)));
+  canvas.width = width;
+  canvas.height = height;
+  ctx.drawImage(video, 0, 0, width, height);
+  return ctx.getImageData(0, 0, width, height);
+}
+
+function calibrateBaseline() {
+  if (!stream) {
+    log('warn', 'Start the camera before calibrating');
+    return;
+  }
+
+  try {
+    baselineFrame = captureFrame();
+    updateCard('left', false);
+    updateCard('right', false);
+    updateScore(0, true);
+    setBigStatus('safe', 'CLEAR', 'Baseline calibrated', 'Scan will compare new frames against this view');
+    log('info', 'Clear-view baseline saved');
+  } catch (error) {
+    log('warn', `Calibration failed: ${error.message}`);
   }
 }
 
 async function scanNow() {
   if (isAnalyzing || !stream) return;
   isAnalyzing = true;
-  setDot('ai', true, 'AI ANALYZING');
+  setDot('ai', true, 'DETECTOR ANALYZING');
   document.getElementById('analyzingBadge').classList.add('visible');
-  document.getElementById('scanNowBtn').disabled = true;
+  els.scanNowBtn.disabled = true;
 
   try {
-    // Capture frame
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
-    canvas.getContext('2d').drawImage(video, 0, 0);
-    const base64Image = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
-
-    const headers = {
-      'Content-Type': 'application/json',
-      'anthropic-version': '2023-06-01'
-    };
-
-    const response = await fetch(apiConfig.endpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: 'image/jpeg', data: base64Image }
-            },
-            {
-              type: 'text',
-              text: `You are a driveway safety assistant. Analyze this image from a camera mounted on a house window overlooking the road outside a driveway.
-
-Determine if it is SAFE for a car to exit the driveway. Focus on:
-- Are there any cars, trucks, motorcycles, cyclists, or pedestrians visible on the road?
-- Specifically check the LEFT side and RIGHT side of the road separately.
-
-Respond ONLY with a JSON object (no markdown, no explanation) in this exact format:
-{
-  "safe": true or false,
-  "leftSide": "clear" or "detected",
-  "rightSide": "clear" or "detected",
-  "confidence": 0-100,
-  "summary": "One short sentence about what you see",
-  "details": "Brief description of detected objects if any"
-}`
-            }
-          ]
-        }]
-      })
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`AI request failed (${response.status}): ${errText.slice(0, 180)}`);
+    const frame = captureFrame();
+    if (!baselineFrame) {
+      baselineFrame = frame;
+      setBigStatus('idle', 'SET', 'Baseline captured', 'Run another scan to detect movement');
+      log('info', 'Initial baseline captured');
+      return;
     }
 
-    const data = await response.json();
-    const text = data.content.map((c) => c.text || '').join('');
-
-    let result;
-    try {
-      const clean = extractJsonObject(text);
-      result = JSON.parse(clean);
-    } catch (e) {
-      const preview = text.replace(/\s+/g, ' ').trim().slice(0, 280);
-      log('warn', `Could not parse AI response. Raw (trimmed): ${preview || '(empty)'}`);
-      throw new Error('Could not parse AI response');
-    }
-
+    const result = analyzeMotion(frame, baselineFrame);
+    baselineFrame = blendFrames(baselineFrame, frame, result.anyDetected ? 0.02 : 0.15);
     applyResult(result);
     document.getElementById('lastCheckTime').textContent = new Date().toLocaleTimeString();
-  } catch (e) {
-    const hint = (e && e.message && e.message.includes('Failed to fetch'))
-      ? 'Network/proxy error. Ensure local API proxy is running at /api/anthropic/messages.'
-      : e.message;
-    log('warn', `Scan error: ${hint}`);
-    setBigStatus('warning', 'ERROR', 'Scan failed', hint);
+  } catch (error) {
+    log('warn', `Scan error: ${error.message}`);
+    setBigStatus('warning', 'ERROR', 'Scan failed', error.message);
   } finally {
     isAnalyzing = false;
-    setDot('ai', false, 'AI STANDBY');
+    setDot('ai', false, 'DETECTOR STANDBY');
     document.getElementById('analyzingBadge').classList.remove('visible');
-    document.getElementById('scanNowBtn').disabled = false;
+    els.scanNowBtn.disabled = !stream;
   }
 }
 
-/** Pull first {...} block from model text (handles prose before/after JSON). */
-function extractJsonObject(raw) {
-  let s = raw.replace(/```json|```/gi, '').trim();
-  const start = s.indexOf('{');
-  const end = s.lastIndexOf('}');
-  if (start !== -1 && end > start) {
-    s = s.slice(start, end + 1);
+function analyzeMotion(frame, baseline) {
+  const zones = {
+    left: { x1: 0.04, x2: 0.32, y1: 0.1, y2: 0.9 },
+    right: { x1: 0.68, x2: 0.96, y1: 0.1, y2: 0.9 }
+  };
+  const leftScore = scoreZone(frame, baseline, zones.left);
+  const rightScore = scoreZone(frame, baseline, zones.right);
+  const threshold = mapSensitivityToThreshold(sensitivity);
+  const leftDetected = leftScore >= threshold;
+  const rightDetected = rightScore >= threshold;
+  const maxScore = Math.max(leftScore, rightScore);
+
+  return {
+    anyDetected: leftDetected || rightDetected,
+    confidence: Math.min(100, Math.round((maxScore / threshold) * 100)),
+    leftDetected,
+    leftScore,
+    rightDetected,
+    rightScore,
+    summary: buildSummary(leftDetected, rightDetected, leftScore, rightScore)
+  };
+}
+
+function scoreZone(frame, baseline, zone) {
+  const width = frame.width;
+  const height = frame.height;
+  const xStart = Math.floor(width * zone.x1);
+  const xEnd = Math.floor(width * zone.x2);
+  const yStart = Math.floor(height * zone.y1);
+  const yEnd = Math.floor(height * zone.y2);
+  let changed = 0;
+  let total = 0;
+  let diffSum = 0;
+
+  for (let y = yStart; y < yEnd; y += 2) {
+    for (let x = xStart; x < xEnd; x += 2) {
+      const index = (y * width + x) * 4;
+      const currentLum = luminance(frame.data, index);
+      const baseLum = luminance(baseline.data, index);
+      const diff = Math.abs(currentLum - baseLum);
+      total++;
+      diffSum += diff;
+      if (diff > 28) changed++;
+    }
   }
-  return s;
+
+  const changedRatio = changed / Math.max(1, total);
+  const averageDiff = diffSum / Math.max(1, total);
+  return Math.round((changedRatio * 80) + (averageDiff * 0.6));
 }
 
-function parseSideFlag(v) {
-  if (v == null) return false;
-  const s = String(v).trim().toLowerCase();
-  return s === 'detected' || s === 'hazard' || s === 'occupied' || s === 'yes' || s === 'true';
+function luminance(data, index) {
+  return (data[index] * 0.299) + (data[index + 1] * 0.587) + (data[index + 2] * 0.114);
 }
 
-function parseSafeFlag(v) {
-  if (typeof v === 'boolean') return v;
-  if (typeof v === 'number' && !Number.isNaN(v)) return v !== 0;
-  if (typeof v === 'string') {
-    const s = v.trim().toLowerCase();
-    if (s === 'true' || s === 'safe' || s === 'yes' || s === 'clear') return true;
-    if (s === 'false' || s === 'unsafe' || s === 'no' || s === 'stop') return false;
-    return false;
+function mapSensitivityToThreshold(value) {
+  return 52 - (value * 0.42);
+}
+
+function blendFrames(previous, current, alpha) {
+  const blended = new ImageData(previous.width, previous.height);
+  for (let i = 0; i < previous.data.length; i += 4) {
+    blended.data[i] = (previous.data[i] * (1 - alpha)) + (current.data[i] * alpha);
+    blended.data[i + 1] = (previous.data[i + 1] * (1 - alpha)) + (current.data[i + 1] * alpha);
+    blended.data[i + 2] = (previous.data[i + 2] * (1 - alpha)) + (current.data[i + 2] * alpha);
+    blended.data[i + 3] = 255;
   }
-  if (v == null) return false;
-  return Boolean(v);
+  return blended;
 }
 
-function parseConfidence(v) {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(100, Math.round(n)));
-}
+function applyResult(result) {
+  updateCard('left', result.leftDetected);
+  updateCard('right', result.rightDetected);
+  updateScore(result.confidence, !result.anyDetected);
 
-function applyResult(r) {
-  const safe = parseSafeFlag(r.safe);
-  const left = parseSideFlag(r.leftSide);
-  const right = parseSideFlag(r.rightSide);
-  const conf = parseConfidence(r.confidence);
-
-  // Update zone cards
-  updateCard('left', left);
-  updateCard('right', right);
-
-  // Confidence bar
-  document.getElementById('confPct').textContent = `${conf}%`;
-  document.getElementById('confBar').style.width = `${conf}%`;
-  document.getElementById('confBar').style.background = safe ? 'var(--safe)' : 'var(--danger)';
-
-  if (safe) {
-    setBigStatus('safe', 'SAFE', 'Clear to exit', r.summary);
-    flash('green');
-    log('safe', `CLEAR - ${r.summary}`);
-  } else {
-    setBigStatus('danger', 'STOP', 'Vehicle detected!', r.details || r.summary);
+  if (result.anyDetected) {
+    setBigStatus('danger', 'STOP', 'Motion detected', result.summary);
     flash('red');
-    log('danger', `STOP - ${r.summary}`);
+    log('danger', `STOP - ${result.summary}`);
+  } else {
+    setBigStatus('safe', 'CLEAR', 'No motion in zones', result.summary);
+    flash('green');
+    log('safe', `CLEAR - ${result.summary}`);
   }
+}
+
+function buildSummary(leftDetected, rightDetected, leftScore, rightScore) {
+  const left = `left ${Math.round(leftScore)}`;
+  const right = `right ${Math.round(rightScore)}`;
+  if (leftDetected && rightDetected) return `Movement in both road zones (${left}, ${right})`;
+  if (leftDetected) return `Movement in the left road zone (${left}, ${right})`;
+  if (rightDetected) return `Movement in the right road zone (${left}, ${right})`;
+  return `Both road zones look still (${left}, ${right})`;
 }
 
 function updateCard(side, detected) {
   const card = document.getElementById(`${side}Card`);
   const status = document.getElementById(`${side}Status`);
-  card.className = `detection-card ${detected ? 'detected' : 'clear'}`;
-  status.textContent = detected ? 'VEHICLE' : 'CLEAR';
+  card.className = `detection-card ${detected === null ? '' : detected ? 'detected' : 'clear'}`;
+  status.textContent = detected === null ? '-' : detected ? 'MOTION' : 'CLEAR';
+}
+
+function updateScore(score, safe) {
+  const boundedScore = Math.max(0, Math.min(100, Math.round(score)));
+  document.getElementById('confPct').textContent = `${boundedScore}%`;
+  const bar = document.getElementById('confBar');
+  bar.style.width = `${boundedScore}%`;
+  bar.style.background = safe ? 'var(--safe)' : 'var(--danger)';
 }
 
 function setBigStatus(cls, label, title, sub) {
@@ -325,7 +374,7 @@ function flash(color) {
   const el = document.getElementById('alertFlash');
   el.className = `alert-flash ${color}`;
   el.style.opacity = '1';
-  setTimeout(() => {
+  window.setTimeout(() => {
     el.style.opacity = '0';
   }, 300);
 }
@@ -335,46 +384,47 @@ function setDot(type, active, label) {
   document.getElementById(type === 'cam' ? 'camStatusText' : 'aiStatusText').textContent = label;
 }
 
-function updateMobileUI() {
-  if (!isMobile) {
-    return;
-  }
-
-  const mobileHint = document.getElementById('mobileHint');
-  const mobileRearBtn = document.getElementById('mobileRearBtn');
-  const noCameraMsgText = document.querySelector('#noCameraMsg p');
-
-  if (mobileHint) mobileHint.style.display = 'block';
-  if (mobileRearBtn) mobileRearBtn.style.display = 'block';
-  if (noCameraMsgText) {
-    noCameraMsgText.innerHTML = 'On mobile, tap <strong>Use Rear Camera</strong> for better road visibility.';
-  }
-}
-
 function log(type, msg) {
   const container = document.getElementById('logEntries');
   const entry = document.createElement('div');
-  entry.className = 'log-entry';
-  const t = new Date().toLocaleTimeString('en-US', {
+  const time = document.createElement('span');
+  const message = document.createElement('span');
+  const timestamp = new Date().toLocaleTimeString('en-US', {
     hour12: false,
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit'
   });
-  entry.innerHTML = `<span class="log-time">${t}</span><span class="log-msg ${type}">${msg}</span>`;
+
+  entry.className = 'log-entry';
+  time.className = 'log-time';
+  time.textContent = timestamp;
+  message.className = `log-msg ${type}`;
+  message.textContent = msg;
+  entry.append(time, message);
   container.prepend(entry);
-  // Trim to 50 entries
-  while (container.children.length > 50) container.removeChild(container.lastChild);
+
+  while (container.children.length > 50) {
+    container.removeChild(container.lastChild);
+  }
 }
 
-// Expose functions used by inline button handlers.
-window.startCamera = startCamera;
-window.startMobileRearCamera = startMobileRearCamera;
-window.setInterval_ = setInterval_;
-window.toggleAutoScan = toggleAutoScan;
-window.scanNow = scanNow;
+function bindEvents() {
+  els.startCameraBtn.addEventListener('click', startCamera);
+  els.scanNowBtn.addEventListener('click', scanNow);
+  els.autoScanBtn.addEventListener('click', toggleAutoScan);
+  els.calibrateBtn.addEventListener('click', calibrateBaseline);
+  els.sensitivityRange.addEventListener('input', (event) => {
+    sensitivity = Number(event.target.value);
+    els.sensitivityValue.textContent = sensitivity;
+  });
+  document.querySelectorAll('.interval-btn').forEach((button) => {
+    button.addEventListener('click', () => setInterval_(Number(button.dataset.val)));
+  });
+}
 
-// Init
+window.addEventListener('beforeunload', stopStream);
+bindEvents();
 loadCameras();
 log('info', 'DrivewayGuard initialized');
-log('info', 'Select camera and start monitoring');
+log('info', 'Start camera, calibrate clear view, then scan');

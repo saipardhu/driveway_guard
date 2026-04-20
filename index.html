@@ -7,105 +7,110 @@
   <link rel="stylesheet" href="./assets/css/styles.css">
 </head>
 <body>
+  <div class="alert-flash" id="alertFlash"></div>
 
-<div class="alert-flash" id="alertFlash"></div>
-
-<header>
-  <div class="logo">
-    <div class="logo-icon">🚗</div>
-    <div class="logo-text">Driveway<span>Guard</span></div>
-  </div>
-  <div class="header-status">
-    <div><span class="status-dot" id="camDot"></span> <span id="camStatusText">CAMERA OFFLINE</span></div>
-    <div><span class="status-dot" id="aiDot"></span> <span id="aiStatusText">AI STANDBY</span></div>
-  </div>
-</header>
-
-<main>
-  <div class="video-section" id="videoSection">
-    <div class="no-camera" id="noCameraMsg">
-      <div class="no-camera-icon">📷</div>
-      <h3>No Camera Feed</h3>
-      <p>Select your mounted camera from the panel and click <strong>Start Camera</strong> to begin monitoring your driveway.</p>
+  <header>
+    <div class="logo">
+      <div class="logo-icon">DG</div>
+      <div class="logo-text">Driveway<span>Guard</span></div>
     </div>
-    <video id="videoFeed" autoplay playsinline muted style="display:none;"></video>
-    <canvas id="captureCanvas"></canvas>
+    <div class="header-status">
+      <div><span class="status-dot" id="camDot"></span> <span id="camStatusText">CAMERA OFFLINE</span></div>
+      <div><span class="status-dot" id="aiDot"></span> <span id="aiStatusText">DETECTOR STANDBY</span></div>
+    </div>
+  </header>
 
-    <div class="video-overlay" id="videoOverlay" style="display:none;">
-      <div class="corner tl"></div>
-      <div class="corner tr"></div>
-      <div class="corner bl"></div>
-      <div class="corner br"></div>
-      <div class="zone left"><span class="zone-label">Left Zone</span></div>
-      <div class="zone right"><span class="zone-label">Right Zone</span></div>
-      <div class="scan-line" id="scanLine"></div>
-      <div class="analyzing-badge" id="analyzingBadge">
-        <div class="pulse-dot"></div>
-        ANALYZING
+  <main>
+    <section class="video-section" id="videoSection" aria-label="Driveway camera">
+      <div class="no-camera" id="noCameraMsg">
+        <div class="no-camera-icon">CAM</div>
+        <h3>No Camera Feed</h3>
+        <p>Select your mounted camera and click <strong>Start Camera</strong> to begin monitoring your driveway.</p>
       </div>
-    </div>
 
-    <div class="video-status-banner" id="statusBanner" style="display:none;">
-      <div class="big-status idle" id="bigStatus">STANDBY</div>
-      <div class="status-detail">
-        <div class="status-detail-title" id="statusTitle">Waiting for scan</div>
-        <div class="status-detail-sub" id="statusSub">Press SCAN NOW or enable auto-scan</div>
-      </div>
-    </div>
-  </div>
+      <video id="videoFeed" autoplay playsinline muted></video>
+      <canvas id="captureCanvas"></canvas>
 
-  <div class="side-panel">
-    <div class="panel-section">
-      <div class="section-label">Camera Setup</div>
-      <div class="mobile-hint" id="mobileHint" style="display:none;">Mobile detected: use rear camera for driveway view.</div>
-      <select id="cameraSelect">
-        <option value="">Select camera...</option>
-      </select>
-      <button class="btn btn-secondary" id="mobileRearBtn" onclick="startMobileRearCamera()" style="display:none;">Use Rear Camera</button>
-      <button class="btn btn-primary" id="startCameraBtn" onclick="startCamera()">Start Camera</button>
-    </div>
-
-    <div class="panel-section">
-      <div class="section-label">Zone Status</div>
-      <div class="detection-grid">
-        <div class="detection-card" id="leftCard">
-          <div class="detection-card-icon">⬅️</div>
-          <div class="detection-card-label">Left</div>
-          <div class="detection-card-status" id="leftStatus">—</div>
-        </div>
-        <div class="detection-card" id="rightCard">
-          <div class="detection-card-icon">➡️</div>
-          <div class="detection-card-label">Right</div>
-          <div class="detection-card-status" id="rightStatus">—</div>
+      <div class="video-overlay" id="videoOverlay">
+        <div class="corner tl"></div>
+        <div class="corner tr"></div>
+        <div class="corner bl"></div>
+        <div class="corner br"></div>
+        <div class="zone left"><span class="zone-label">Left Zone</span></div>
+        <div class="zone right"><span class="zone-label">Right Zone</span></div>
+        <div class="scan-line" id="scanLine"></div>
+        <div class="analyzing-badge" id="analyzingBadge">
+          <div class="pulse-dot"></div>
+          ANALYZING
         </div>
       </div>
-      <div class="conf-bar-wrap">
-        <div class="conf-bar-label"><span>CONFIDENCE</span><span id="confPct">—</span></div>
-        <div class="conf-bar-track"><div class="conf-bar-fill" id="confBar" style="width:0%"></div></div>
+
+      <div class="video-status-banner" id="statusBanner">
+        <div class="big-status idle" id="bigStatus">STANDBY</div>
+        <div class="status-detail">
+          <div class="status-detail-title" id="statusTitle">Waiting for camera</div>
+          <div class="status-detail-sub" id="statusSub">Start the camera, then scan or enable auto-scan</div>
+        </div>
       </div>
-    </div>
+    </section>
 
-    <div class="panel-section">
-      <div class="section-label">Scan Mode</div>
-      <div class="interval-row">
-        <div class="interval-btn" data-val="3" onclick="setInterval_(3)">3s</div>
-        <div class="interval-btn active" data-val="5" onclick="setInterval_(5)">5s</div>
-        <div class="interval-btn" data-val="10" onclick="setInterval_(10)">10s</div>
-        <div class="interval-btn" data-val="0" onclick="setInterval_(0)">Manual</div>
+    <aside class="side-panel" aria-label="Controls and detection status">
+      <div class="panel-section">
+        <div class="section-label">Camera Setup</div>
+        <select id="cameraSelect" aria-label="Camera">
+          <option value="">Default camera</option>
+        </select>
+        <button class="btn btn-primary" id="startCameraBtn" type="button">Start Camera</button>
       </div>
-      <button class="btn btn-success" id="autoScanBtn" onclick="toggleAutoScan()" disabled>Enable Auto-Scan</button>
-      <button class="btn btn-primary" id="scanNowBtn" onclick="scanNow()" disabled>Scan Now</button>
-    </div>
 
-    <div class="log-section">
-      <div class="section-label">Event Log</div>
-      <div id="logEntries"></div>
-    </div>
+      <div class="panel-section">
+        <div class="section-label">Zone Status</div>
+        <div class="detection-grid">
+          <div class="detection-card" id="leftCard">
+            <div class="detection-card-icon">&larr;</div>
+            <div class="detection-card-label">Left</div>
+            <div class="detection-card-status" id="leftStatus">&mdash;</div>
+          </div>
+          <div class="detection-card" id="rightCard">
+            <div class="detection-card-icon">&rarr;</div>
+            <div class="detection-card-label">Right</div>
+            <div class="detection-card-status" id="rightStatus">&mdash;</div>
+          </div>
+        </div>
+        <div class="conf-bar-wrap">
+          <div class="conf-bar-label"><span>MOTION SCORE</span><span id="confPct">&mdash;</span></div>
+          <div class="conf-bar-track"><div class="conf-bar-fill" id="confBar"></div></div>
+        </div>
+      </div>
 
-    <div class="last-check">Last check: <span id="lastCheckTime">—</span></div>
-  </div>
-</main>
+      <div class="panel-section">
+        <div class="section-label">Detection</div>
+        <label class="control-label" for="sensitivityRange">Sensitivity <span id="sensitivityValue">55</span>%</label>
+        <input id="sensitivityRange" type="range" min="15" max="90" value="55">
+        <button class="btn btn-secondary" id="calibrateBtn" type="button" disabled>Calibrate Clear View</button>
+      </div>
 
-<script src="./assets/js/app.js"></script>
+      <div class="panel-section">
+        <div class="section-label">Scan Mode</div>
+        <div class="interval-row" role="group" aria-label="Auto scan interval">
+          <button class="interval-btn" type="button" data-val="3">3s</button>
+          <button class="interval-btn active" type="button" data-val="5">5s</button>
+          <button class="interval-btn" type="button" data-val="10">10s</button>
+          <button class="interval-btn" type="button" data-val="0">Manual</button>
+        </div>
+        <button class="btn btn-success" id="autoScanBtn" type="button" disabled>Enable Auto-Scan</button>
+        <button class="btn btn-primary" id="scanNowBtn" type="button" disabled>Scan Now</button>
+      </div>
+
+      <div class="log-section">
+        <div class="section-label">Event Log</div>
+        <div id="logEntries" aria-live="polite"></div>
+      </div>
+
+      <div class="last-check">Last check: <span id="lastCheckTime">&mdash;</span></div>
+    </aside>
+  </main>
+
+  <script src="./assets/js/app.js"></script>
 </body>
 </html>
